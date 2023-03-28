@@ -109,6 +109,13 @@ BRANCHES = {Opcode.beq, Opcode.bne, Opcode.bcs, Opcode.bcc, Opcode.bmi, Opcode.b
 
 # See GBATEK: https://problemkaputt.de/gbatek.htm#thumbinstructionsummary
 
+def format_imm_str(imm):
+    if imm > 9:
+        imm_str = f"0x{imm:x}"
+    else:
+        imm_str = str(imm)
+
+    return imm_str
 
 class ThumbInstr:
     """ Abstract base class for Thumb instructions. """
@@ -151,14 +158,14 @@ class Thumb1(ThumbInstr):  # Move shifted register
 
     @property
     def mnemonic(self):
-        return self.id.name + 's'
+        return self.id.name
 
     @property
     def op_str(self):
         if self.offset == 0 and self.id in (Opcode.lsr, Opcode.asr):  # Zero->32?
             return f'{self.rd.name}, {self.rs.name}, #0x20'
         else:
-            return f'{self.rd.name}, {self.rs.name}, #0x{self.offset:02X}'
+            return f'{self.rd.name}, {self.rs.name}, #{format_imm_str(self.offset)}'
 
 
 class Thumb2(ThumbInstr):  # Add/subtract
@@ -170,12 +177,12 @@ class Thumb2(ThumbInstr):  # Add/subtract
 
     @property
     def mnemonic(self):
-        return self.id.name + 's'
+        return self.id.name
 
     @property
     def op_str(self):
         if type(self.n) is int:
-            return f'{self.rd.name}, {self.rs.name}, #0x{self.n:X}'
+            return f'{self.rd.name}, {self.rs.name}, #{format_imm_str(self.n)}'
         else:
             return f'{self.rd.name}, {self.rs.name}, {self.n.name}'
 
@@ -196,11 +203,11 @@ class Thumb3(ThumbInstr):  # Move/compare/add/subtract immediate
 
     @property
     def mnemonic(self):
-        return self.id.name + 's' if self.id != Opcode.cmp else self.id.name  # 's' on cmp is deprecated
+        return self.id.name
 
     @property
     def op_str(self):
-        return f'{self.rd.name}, #0x{self.imm:02X}'
+        return f'{self.rd.name}, #{format_imm_str(self.imm)}'
 
 
 class Thumb4(ThumbInstr):  # ALU operations
@@ -211,7 +218,7 @@ class Thumb4(ThumbInstr):  # ALU operations
 
     @property
     def mnemonic(self):
-        return self.id.name if self.id in (Opcode.tst, Opcode.cmp, Opcode.cmn) else self.id.name.lower() + 's'
+        return self.id.name if self.id in (Opcode.tst, Opcode.cmp, Opcode.cmn) else self.id.name.lower()
 
     @property
     def op_str(self):
@@ -256,7 +263,7 @@ class Thumb6(ThumbInstr):  # Load PC-relative
 
     @property
     def op_str(self):
-        return f'{self.rd.name}, [pc, #0x{self.imm*4:03X}]'
+        return f'{self.rd.name}, [pc,#{format_imm_str(self.imm * 4)}]'
 
     @property
     def target(self):
@@ -271,7 +278,7 @@ class Thumb78(ThumbInstr):  # Load/store with register offset
 
     @property
     def op_str(self):
-        return f'{self.rd.name}, [{self.rb.name}, {self.ro.name}]'
+        return f'{self.rd.name}, [{self.rb.name},{self.ro.name}]'
 
 
 class Thumb910(ThumbInstr):  # Load/store with immediate offset
@@ -283,10 +290,10 @@ class Thumb910(ThumbInstr):  # Load/store with immediate offset
     @property
     def op_str(self):
         if self.id in (Opcode.strb, Opcode.ldrb):
-            return f'{self.rd.name}, [{self.rb.name}, #0x{self.imm:02X}]'
+            return f'{self.rd.name}, [{self.rb.name},#{format_imm_str(self.imm)}]'
         elif self.id in (Opcode.strh, Opcode.ldrh):
-            return f'{self.rd.name}, [{self.rb.name}, #0x{self.imm*2:02X}]'
-        return f'{self.rd.name}, [{self.rb.name}, #0x{self.imm*4:02X}]'
+            return f'{self.rd.name}, [{self.rb.name},#{format_imm_str(self.imm*2)}]'
+        return f'{self.rd.name}, [{self.rb.name},#{format_imm_str(self.imm*4)}]'
 
 
 class Thumb11(ThumbInstr):  # Load/store SP-relative
@@ -297,7 +304,7 @@ class Thumb11(ThumbInstr):  # Load/store SP-relative
 
     @property
     def op_str(self):
-        return f'{self.rd.name}, [sp, #0x{self.imm*4:03X}]'
+        return f'{self.rd.name}, [sp,{format_imm_str(self.imm*4)}]'
 
 
 class Thumb12(ThumbInstr):  # Get relative address
@@ -308,7 +315,7 @@ class Thumb12(ThumbInstr):  # Get relative address
 
     @property
     def op_str(self):
-        return f'{self.rd.name}, {self.rs.name}, #0x{self.imm*4:03X}'
+        return f'{self.rd.name}, {self.rs.name}, #{format_imm_str(self.imm*4)}'
 
     @property
     def target(self):
@@ -325,13 +332,16 @@ class Thumb13(ThumbInstr):  # Add offset to stack pointer
 
     @property
     def mnemonic(self):
-        return Opcode.add.name
+        if self.id == Opcode.add:
+            return Opcode.add.name
+        else:
+            return Opcode.sub.name
 
     @property
     def op_str(self):
-        if self.id == Opcode.sub:
-            return f'sp, #-0x{self.imm*4:03X}'
-        return f'sp, #0x{self.imm*4:03X}'
+        #if self.id == Opcode.sub:
+        #    return f'sp, #-0x{self.imm*4:03X}'
+        return f'sp, #{format_imm_str(self.imm*4)}'
 
 
 class Thumb14(ThumbInstr):  # Push/pop registers
@@ -348,8 +358,29 @@ class Thumb14(ThumbInstr):  # Push/pop registers
         regs = []
         for bit in range(16):
             if self.rlist & (1 << bit):
-                regs.append(Reg(bit).name)
-        return '{' + ', '.join(regs) + '}'
+                #regs.append(Reg(bit).name)
+                regs.append(bit)
+
+        if len(regs) == 0:
+            return "{}"
+
+        regs.append(100)
+        start_reg = regs[0]
+        prev_reg = start_reg
+        reg_parts = []
+        for reg in regs[1:]:
+            if reg != prev_reg + 1:
+                if prev_reg - start_reg < 2:
+                    reg_parts.extend(Reg(reg2).name for reg2 in range(start_reg, prev_reg + 1))
+                else:
+                    end_reg = prev_reg
+                    reg_parts.append(f"{Reg(start_reg).name}-{Reg(end_reg).name}")
+
+                start_reg = reg
+
+            prev_reg = reg
+
+        return '{' + ','.join(reg_parts) + '}'
 
     def __contains__(self, r):
         return self.rlist & (1 << r) != 0

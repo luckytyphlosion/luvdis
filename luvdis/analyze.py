@@ -370,6 +370,9 @@ class CPUState:
 
 
 class State:
+    __slots__ = ("unexpanded", "module_addrs", "functions", "not_funcs", "min_calls", "min_length", "start",
+        "stop", "macros", "debug_ranges", "call_to", "ptrs_to", "flags", "label_map", "labels")
+
     def __init__(self, functions=None, min_calls=2, min_length=3, start=BASE_ADDRESS, stop=INF, macros=None):
         self.unexpanded = {}
         self.module_addrs = {}
@@ -390,6 +393,7 @@ class State:
         self.debug_ranges = {}
 
         self.call_to = defaultdict(set)  # addr -> {called from}
+        self.ptrs_to = defaultdict(set)  # addr -> pointer location
 
         self.flags = None
         self.label_map = {BASE_ADDRESS: BRANCH}
@@ -414,6 +418,15 @@ class State:
             # THUMB.19
             elif ins.id == Opcode.bl:
                 self.call_to[ins.target].add(addr)
+
+        # Find all function pointers
+        # Really only applies to MMBN because function pointers are always in .text
+        for addr in range(self.start, self.stop, 4):
+            ptr = rom.read(addr, size=4)
+            # For now, only look at thumb pointers
+            if ptr & 1 == 1 and self.start <= ptr < self.stop:
+                self.ptrs_to[ptr & ~0x1].add(addr)
+
         # Expand all provided functions
         eprint(f'{len(self.unexpanded)} functions provided')
         changed = self.analyze_funcs(rom, 0)
@@ -422,7 +435,7 @@ class State:
             return
         # Repeatedly expand and find new functions
         while changed:
-            changed = self.analyze_funcs(rom, 2/3)  # TODO: Add configurable threshold
+            changed = self.analyze_funcs(rom, 0)  # TODO: Add configurable threshold
         eprint(f'Found {len(self.functions)} functions')
         # Guess functions based on push-bl intersection
         self.guess_funcs(rom, pushes)
@@ -436,23 +449,28 @@ class State:
         self.make_labels(rom)
 
     def guess_funcs(self, rom, entries):  # Guess functions based on number of calls and code length
+        dprint("Guessing funcs!")
         dicts = (self.functions, self.unexpanded, self.not_funcs)
         for maybe_func in entries:
             if maybe_func < self.stop and all(maybe_func not in d for d in dicts):
                 ncalls = len(self.call_to[maybe_func])  # Number of calls pointing here
-                if ncalls < self.min_calls:  # Not enough calls; reject
+                nptrs = len(self.ptrs_to[maybe_func])  # Number of ptrs referencing here
+                if ncalls < self.min_calls and nptrs < self.min_calls:  # Not enough calls; reject
+                    #dprint(f"{maybe_func:07x} rejected")
                     continue
                 # Only accept functions with at least min_length legal instructions
                 if any(ins.id == Opcode.ill for ins in rom.dist(maybe_func, self.min_length)):
                     continue
                 if maybe_func > 0x081B32B0:
                     dprint(f'DEBUG: Func {maybe_func:08X} added')
+                #dprint(f"Accepted {maybe_func:07x}")
                 self.unexpanded[maybe_func] = None  # Accept the function
 
     def analyze_func(self, rom, addr, state=None):
         state = state if state else CPUState()
         initial_stack = state[13]  # Initial value of stack pointer
         starts = {addr: state}
+        initial_addr = addr
         expanded = {}  # Start addresses -> exit behavior seen so far
         labels = {}  # Addresses -> label type
         calls = {}  # Addresses -> call state
@@ -465,6 +483,7 @@ class State:
                     ins = state.emulate(rom, addr)  # Emulate until first relevant instruction
                     # Hitting an illegal instruction, or the end of the ROM, is misbehavior
                     if ins is None or ins.id == Opcode.ill:
+                        dprint(f"illegal insn: initial_addr: 0x{initial_addr:07x}")
                         exit_behaved = False
                         end = rom.size | 0x08000000 if ins is None else ins.address
                         break
@@ -485,6 +504,7 @@ class State:
                             if ins.id == Opcode.b:  # Fork on unconditional branch
                                 break
                         else:  # Branching OOB is misbehavior
+                            dprint(f"oob branch: initial_addr: 0x{initial_addr:07x}")
                             exit_behaved = False
                             break
                     elif ins.id == Opcode.bl:
@@ -495,22 +515,40 @@ class State:
                             calls[target] = state.copy()  # Copy state to start of function
                             exit_behaved = None
                         else:
+                            dprint(f"oob call: initial_addr: 0x{initial_addr:07x}")
                             exit_behaved = False  # Calling an OOB function is misbehavior
                             break
                     elif ins.id == Opcode.bx:
-                        target = state[ins.rs] & 0xffffffff
-                        end = addr = ins.address+2
-                        # Well-behaved iff returned properly and the stack is safe
-                        exit_behaved = target == state.return_addr and state[13] == initial_stack
-                        break
+                        # MMBN Hack: ignore dynamic function calls
+                        # mmbn emits mov lr, pc before a dynamic function call
+                        ins_before, = rom.dist(ins.address - 2, 1)
+                        if ins_before.id == Opcode.mov and ins_before.rd == Reg.lr and ins_before.rs == Reg.pc:
+                            addr = ins.address+2
+                            exit_behaved = None
+                        else:
+                            #dprint(f"ins_before.id: {ins_before.id}, ins_before.rd: {ins_before.rd}, ins_before.pc: {ins_before.pc
+                            #dprint(f"ins.address: 0x{ins.address:07x}")
+                            target = state[ins.rs] & 0xffffffff
+                            end = addr = ins.address+2
+                            # Well-behaved iff returned properly and the stack is safe
+                            #exit_behaved = target == state.return_addr and state[13] == initial_stack
+                            exit_behaved = state[13] == initial_stack
+                            if not exit_behaved:
+                                dprint(f"bad bx: initial_addr: 0x{initial_addr:07x}")
+                            break
                     elif ins.id == Opcode.pop:  # pop {pc}
                         end = ins.address+2
-                        exit_behaved = (state[15] & 0xffffff) == state.return_addr
+                        exit_behaved = True #(state[15] & 0xffffff) == state.return_addr
+                        if not exit_behaved:
+                            dprint(f"bad pop: initial_addr: 0x{initial_addr:07x}")
                         break
                     else:  # ADD/MOV pc
                         target = state[ins.rd] & 0xffffffff
                         end = addr = ins.address+2
-                        exit_behaved = target == state.return_addr and state[13] == initial_stack
+                        #exit_behaved = target == state.return_addr and state[13] == initial_stack
+                        exit_behaved = state[13] == initial_stack
+                        if not exit_behaved:
+                            dprint(f"bad add mov/pc: initial_addr: 0x{initial_addr:07x}")                            
                         break
                 expanded[start] = exit_behaved
                 ranges.append((start, end, FLAG_EXEC))
@@ -526,6 +564,8 @@ class State:
         for func, name in self.unexpanded.items():
             exited, total, labels, calls, ranges = self.analyze_func(rom, func)
             if (total and exited/total < threshold) or (total == 0 != threshold):
+                if total == 0:
+                    dprint(f"0x{func:07x} has 0 total exits")
                 self.not_funcs.add(func)
                 continue
             self.label_map.update(labels)
@@ -555,9 +595,9 @@ class State:
             if self.label_map[addr] == FUNC:
                 name, _ = self.functions[addr]
                 if name is None:
-                    name = f'sub_{addr:08X}'
+                    name = f'sub_{addr:07X}'
                 return name
-        return f'_{addr:08X}'
+        return f'_{addr:07X}'
 
     def dump(self, rom, path=None, config_output=None, default_mode=BYTE):
         if config_output:  # Optionally write updated function list
@@ -623,12 +663,12 @@ class State:
             comment = ''
             if label_type == FUNC:  # Tag function start
                 func = label
-                if (addr & (~3)) == addr:
-                    label = f'\tthumb_func_start {func}\n{func}:'
-                else:  # Function is not word-aligned
-                    label = f'\tnon_word_aligned_thumb_func_start {func}\n{func}:'
+                #if (addr & (~3)) == addr:
+                label = f'\n\tthumb_func_start {func}\n{func}:'
+                #else:  # Function is not word-aligned
+                #    label = f'\tnon_word_aligned_thumb_func_start {func}\n{func}:'
                 if func[:4] != 'sub_':  # Comment function address for named functions
-                    comment += f' @ {addr:08X}'
+                    comment += f' // {addr:07X}'
             elif label:
                 label += ':'
 
@@ -669,9 +709,9 @@ class State:
                         warn(f'{addr:08X}: Missing target for "{ins.mnemonic}": {target:08X}')
                         i = rom.read(addr, offset)
                         if offset == 4:
-                            emit = f'.4byte 0x{i:08X} @ {ins.mnemonic} _{target:08X}'
+                            emit = f'.word 0x{i:X} // {ins.mnemonic} _{target:07X}'
                         else:
-                            emit = f'.2byte 0x{i:04X} @ {ins.mnemonic} _{target:08X}'
+                            emit = f'.hword 0x{i:X} // {ins.mnemonic} _{target:07X}'
                 elif ins.id == Opcode.bx:
                     value = rom.read(addr, 2)
                     # Assembler will not emit bx with nonzero rd, see THUMB.5 TODO: Should these be treated as illegal?
@@ -685,7 +725,7 @@ class State:
                         op_str = ins.op_str
                         warn(f'{addr:08X}: Missing target for "ldr {op_str}": {target:08X}')
                     value = rom.read(target, 4)
-                    emit = f'{ins.mnemonic} {op_str} @ =0x{value:08X}'  # QOL; comment value read
+                    emit = f'{ins.mnemonic} {op_str} @ =0x{value:X}'  # QOL; comment value read
                 else:
                     emit = str(ins)
                 if DEBUG and ins.id == Opcode.bx and 'r7' in ins.op_str:  # TODO: Library detection
@@ -694,15 +734,15 @@ class State:
 
                 if label:
                     f.write(f'{label}{comment}\n')
-                f.write(f'\t{emit} @ {addr:08X}\n' if DEBUG else f'\t{emit}\n')
+                f.write(f'\t{emit} @ {addr:07X}\n' if DEBUG else f'\t{emit}\n')
             elif mode == WORD:
                 offset = 4
                 value = rom.read(addr, 4)
                 if value & 1 and self.label_map.get(value-1, None) == FUNC:  # Reference THUMB function
                     value = self.label_for(value-1)
                 else:
-                    value = f'0x{value:08X}'
-                emit = f'{label} .4byte {value}' if label else f'\t.4byte {value}'
+                    value = f'0x{value:X}'
+                emit = f'{label} .word {value}' if label else f'\t.word {value}'
                 if DEBUG:
                     comment += f' @ {addr_flags}'
                 f.write(f'{emit}{comment}\n')
@@ -717,11 +757,11 @@ class State:
                     f.write(f'{label}{comment}\n')
                 value = rom.read(addr, 1)
                 if bytecount == 0:
-                    f.write(f'\t.byte 0x{value:02X}')
+                    f.write(f'\t.byte 0x{value:X}')
                 elif bytecount == 15:
-                    f.write(f', 0x{value:02X}\n')
+                    f.write(f', 0x{value:X}\n')
                 else:
-                    f.write(f', 0x{value:02X}')
+                    f.write(f', 0x{value:X}')
                 bytecount = (bytecount + 1) % 16
             flags = addr_flags
             addr += offset
