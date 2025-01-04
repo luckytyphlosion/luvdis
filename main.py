@@ -5,7 +5,7 @@ from click_default_group import DefaultGroup
 
 from luvdis import __version__
 from luvdis.config import read_config
-from luvdis.common import eprint, set_debug
+from luvdis.common import eprint, set_debug, dprint
 from luvdis.rom import ROM
 from luvdis.analyze import State, BASE_ADDRESS, END_ADDRESS, THUMB, BYTE, WORD
 
@@ -74,7 +74,8 @@ def disasm(rom, output, config, config_out, debug, start, stop, macros, guess, m
         print(k, v)
     set_debug(debug)
     functions = read_config(config) if config else None
-    rom = ROM(rom)
+    dprint(f"functions: {functions}")
+    rom = ROM(rom, detect=False)
     state = State(functions, min_calls, min_length, start, stop, macros)
     state.analyze_rom(rom, guess)
     if output in (None, '-'):
@@ -88,7 +89,7 @@ def disasm(rom, output, config, config_out, debug, start, stop, macros, guess, m
 @click.argument('rom', type=click.Path(exists=True, dir_okay=False, readable=True))
 def info(rom):
     """ Detect GBA ROM game/database information. """
-    rom = ROM(rom, detect=True)
+    rom = ROM(rom, detect=False)
 
 
 if __name__ == '__main__':
