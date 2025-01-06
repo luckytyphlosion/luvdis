@@ -691,11 +691,11 @@ class State:
                             f.write('\n')
                         f.close()
                     f = open(path, 'w', buffering=1)
-                    f.write(ASM_PRELUDE)
-                    f.write(f'.include "{self.macros}"\n' if self.macros else MACROS)
+                    #f.write(ASM_PRELUDE)
+                    #f.write(f'.include "{self.macros}"\n' if self.macros else MACROS)
                     bytecount = 0  # Reset bytecount
-                    if DEBUG:  # Output linker script if debugging
-                        fl.write(f'{path[:-2]}.o(.text);\n')
+                    #if DEBUG:  # Output linker script if debugging
+                    #    fl.write(f'{path[:-2]}.o(.text);\n')
 
             # Emit code or data
             if mode == THUMB:  # THUMB code

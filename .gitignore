@@ -4,4 +4,6 @@ build/
 *.cfg
 *.egg-info/
 dist/
-/*.s
+*.s
+*.dump
+!output/*_expected.s
