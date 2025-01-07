@@ -1,2 +1,3 @@
 dump_directory: "/mnt/c/users/user/downloads/BizHawk-2.9.1-win-x64/Lua/GBA/ai"
 test_basenames: test_names.dump
+ai_scripts_directory: "../pokemonomyth/data/ai"
