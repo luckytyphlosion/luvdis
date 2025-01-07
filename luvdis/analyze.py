@@ -751,7 +751,7 @@ class State:
                         warn(f'{addr:08X}: Missing target for "ldr {op_str}": {target:08X}')
                     value = rom.read(target, 4)
                     if self.omit_extraneous:
-                        emit = f'{ins.mnemonic} {op_str}=0x{value:X}'
+                        emit = f'{ins.mnemonic} {op_str}=0x{value:x}'
                     else:
                         emit = f'{ins.mnemonic} {op_str} @ =0x{value:X}'  # QOL; comment value read
                 else:
