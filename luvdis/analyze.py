@@ -371,9 +371,9 @@ class CPUState:
 
 class State:
     __slots__ = ("unexpanded", "module_addrs", "functions", "not_funcs", "min_calls", "min_length", "start",
-        "stop", "macros", "debug_ranges", "call_to", "ptrs_to", "flags", "label_map", "labels")
+        "stop", "macros", "debug_ranges", "call_to", "ptrs_to", "flags", "label_map", "labels", "omit_extraneous", "function_order", "branches_by_discovery_order")
 
-    def __init__(self, functions=None, min_calls=2, min_length=3, start=BASE_ADDRESS, stop=INF, macros=None):
+    def __init__(self, functions=None, min_calls=2, min_length=3, start=BASE_ADDRESS, stop=INF, macros=None, omit_extraneous=False):
         self.unexpanded = {}
         self.module_addrs = {}
         if functions:
@@ -396,7 +396,10 @@ class State:
         self.ptrs_to = defaultdict(set)  # addr -> pointer location
 
         self.flags = None
-        self.label_map = {BASE_ADDRESS: BRANCH}
+        self.label_map = {}
+        self.omit_extraneous = omit_extraneous
+        self.function_order = {}
+        self.branches_by_discovery_order = {}
 
     def analyze_rom(self, rom, guess=True):  # Analyze a ROM
         if type(self.stop) is float:
@@ -461,8 +464,8 @@ class State:
                 # Only accept functions with at least min_length legal instructions
                 if any(ins.id == Opcode.ill for ins in rom.dist(maybe_func, self.min_length)):
                     continue
-                if maybe_func > 0x081B32B0:
-                    dprint(f'DEBUG: Func {maybe_func:08X} added')
+                #if maybe_func > 0x081B32B0:
+                #    dprint(f'DEBUG: Func {maybe_func:08X} added')
                 #dprint(f"Accepted {maybe_func:07x}")
                 self.unexpanded[maybe_func] = None  # Accept the function
 
@@ -473,6 +476,7 @@ class State:
         initial_addr = addr
         expanded = {}  # Start addresses -> exit behavior seen so far
         labels = {}  # Addresses -> label type
+        branches_by_discovery_order = {}
         calls = {}  # Addresses -> call state
         ranges = []  # List of (start:end) tuples of executable regions
         while starts:  # Continue as long as there are paths to explore
@@ -497,6 +501,9 @@ class State:
                         target = ins.target
                         end = addr = ins.address+2
                         if target < self.stop:
+                            if target not in branches_by_discovery_order:
+                                branches_by_discovery_order[target] = len(branches_by_discovery_order)
+
                             labels[target] = BRANCH
                             if target not in expanded:  # Add target as start
                                 new_starts[target] = state.copy()
@@ -556,19 +563,20 @@ class State:
         # Tally exit behaviors
         exits = [1 if behavior else 0 for behavior in expanded.values() if behavior is not None]
         total, exited = len(exits), sum(exits)
-        return exited, total, labels, calls, ranges
+        return exited, total, labels, branches_by_discovery_order, calls, ranges
 
     def analyze_funcs(self, rom, threshold=0.5):
         changed = False
         new_unexpanded = {}
         for func, name in self.unexpanded.items():
-            exited, total, labels, calls, ranges = self.analyze_func(rom, func)
+            exited, total, labels, branches_by_discovery_order, calls, ranges = self.analyze_func(rom, func)
             if (total and exited/total < threshold) or (total == 0 != threshold):
                 if total == 0:
                     dprint(f"0x{func:07x} has 0 total exits")
                 self.not_funcs.add(func)
                 continue
             self.label_map.update(labels)
+            self.branches_by_discovery_order.update(branches_by_discovery_order)
             for start, end, flag in ranges:
                 self.flags[start:end] |= flag
                 if DEBUG and (flag & FLAG_EXEC):  # Track executable ranges for debugging
@@ -589,15 +597,28 @@ class State:
             self.label_map[func] = FUNC
         self.labels = list(self.label_map.keys())
         self.labels.sort()
+        
+        func_labels = [func for func, label_type in self.label_map.items() if label_type == FUNC]
+        self.function_order = {func: i for i, func in enumerate(func_labels)}
 
     def label_for(self, addr):
         if addr in self.label_map:
             if self.label_map[addr] == FUNC:
                 name, _ = self.functions[addr]
                 if name is None:
-                    name = f'sub_{addr:07X}'
+                    if self.omit_extraneous:
+                        name = f'AIScript_sub{self.function_order[addr]}'
+                    else:
+                        name = f'sub_{addr:07X}'
                 return name
-        return f'_{addr:07X}'
+
+        if self.omit_extraneous and self.label_map.get(addr) == BRANCH:
+            try:
+                return f".label{self.branches_by_discovery_order[addr]}"
+            except KeyError:
+                raise RuntimeError(f"label_for branch addr not found. addr: {addr}, self.label_map: {self.label_map}")
+        else:
+            return f'_{addr:07X}'
 
     def dump(self, rom, path=None, config_output=None, default_mode=BYTE):
         if config_output:  # Optionally write updated function list
@@ -664,12 +685,13 @@ class State:
             if label_type == FUNC:  # Tag function start
                 func = label
                 #if (addr & (~3)) == addr:
-                label = f'\n\tthumb_func_start {func}\n{func}:'
+                #label = f'\n\tthumb_func_start {func}\n{func}:'
+                label = f'\n{func}:'
                 #else:  # Function is not word-aligned
                 #    label = f'\tnon_word_aligned_thumb_func_start {func}\n{func}:'
-                if func[:4] != 'sub_':  # Comment function address for named functions
-                    comment += f' // {addr:07X}'
-            elif label:
+                #if func[:4] != 'sub_':  # Comment function address for named functions
+                #    comment += f' // {addr:07X}'
+            elif label and not (self.omit_extraneous and label.startswith(".")):
                 label += ':'
 
             # If switching out of byte mode mid-line, write a newline
@@ -720,12 +742,18 @@ class State:
                     target = ins.target
                     if target in self.label_map:
                         name = self.label_for(target)
-                        op_str = ins.op_str[:ins.op_str.index('[')] + name
+                        if self.omit_extraneous:
+                            op_str = ins.op_str[:ins.op_str.index('[')]
+                        else:
+                            op_str = ins.op_str[:ins.op_str.index('[')] + name
                     else:
                         op_str = ins.op_str
                         warn(f'{addr:08X}: Missing target for "ldr {op_str}": {target:08X}')
                     value = rom.read(target, 4)
-                    emit = f'{ins.mnemonic} {op_str} @ =0x{value:X}'  # QOL; comment value read
+                    if self.omit_extraneous:
+                        emit = f'{ins.mnemonic} {op_str}=0x{value:X}'
+                    else:
+                        emit = f'{ins.mnemonic} {op_str} @ =0x{value:X}'  # QOL; comment value read
                 else:
                     emit = str(ins)
                 if DEBUG and ins.id == Opcode.bx and 'r7' in ins.op_str:  # TODO: Library detection
@@ -742,10 +770,15 @@ class State:
                     value = self.label_for(value-1)
                 else:
                     value = f'0x{value:X}'
-                emit = f'{label} .word {value}' if label else f'\t.word {value}'
-                if DEBUG:
-                    comment += f' @ {addr_flags}'
-                f.write(f'{emit}{comment}\n')
+                
+                if self.omit_extraneous:
+                    if old_mode != WORD:
+                        f.write(f"\t.pool\n")
+                else:
+                    emit = f'{label} .word {value}' if label else f'\t.word {value}'
+                    if DEBUG:
+                        comment += f' @ {addr_flags}'
+                    f.write(f'{emit}{comment}\n')
             elif mode == BYTE:
                 offset = 1
                 if old_mode != BYTE:

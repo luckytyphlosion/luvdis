@@ -14,7 +14,7 @@ def disasm(rom, output, functions, debug, start, stop, macros, guess, min_calls,
         print(k, v)
     set_debug(debug)
     rom = ROM(rom, detect=False)
-    state = State(functions, min_calls, min_length, start, stop, macros)
+    state = State(functions, min_calls, min_length, start, stop, macros, omit_extraneous=True)
     state.analyze_rom(rom, guess)
     state.dump(rom, output, None, default_mode)
 
