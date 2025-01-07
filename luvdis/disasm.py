@@ -117,6 +117,12 @@ def format_imm_str(imm):
 
     return imm_str
 
+def format_mem_imm_str(imm):
+    if imm == 0:
+        return ""
+    else:
+        return f",{format_imm_str(imm)}"
+
 class ThumbInstr:
     """ Abstract base class for Thumb instructions. """
     size = 2
@@ -163,9 +169,9 @@ class Thumb1(ThumbInstr):  # Move shifted register
     @property
     def op_str(self):
         if self.offset == 0 and self.id in (Opcode.lsr, Opcode.asr):  # Zero->32?
-            return f'{self.rd.name}, {self.rs.name}, #0x20'
+            return f'{self.rd.name},{self.rs.name},0x20'
         else:
-            return f'{self.rd.name}, {self.rs.name}, #{format_imm_str(self.offset)}'
+            return f'{self.rd.name},{self.rs.name},{format_imm_str(self.offset)}'
 
 
 class Thumb2(ThumbInstr):  # Add/subtract
@@ -182,9 +188,9 @@ class Thumb2(ThumbInstr):  # Add/subtract
     @property
     def op_str(self):
         if type(self.n) is int:
-            return f'{self.rd.name}, {self.rs.name}, #{format_imm_str(self.n)}'
+            return f'{self.rd.name},{self.rs.name},{format_imm_str(self.n)}'
         else:
-            return f'{self.rd.name}, {self.rs.name}, {self.n.name}'
+            return f'{self.rd.name},{self.rs.name},{self.n.name}'
 
     def __str__(self):
         # The assembler will optimize 'adds rx, rx, #nn' away, so use the .inst macro
@@ -207,7 +213,7 @@ class Thumb3(ThumbInstr):  # Move/compare/add/subtract immediate
 
     @property
     def op_str(self):
-        return f'{self.rd.name}, #{format_imm_str(self.imm)}'
+        return f'{self.rd.name},{format_imm_str(self.imm)}'
 
 
 class Thumb4(ThumbInstr):  # ALU operations
@@ -222,7 +228,7 @@ class Thumb4(ThumbInstr):  # ALU operations
 
     @property
     def op_str(self):
-        return f'{self.rd.name}, {self.rs.name}'
+        return f'{self.rd.name},{self.rs.name}'
 
 
 class Thumb5(ThumbInstr):  # High register/branch exchange
@@ -242,7 +248,7 @@ class Thumb5(ThumbInstr):  # High register/branch exchange
         if self.id == Opcode.mov and self.rd == self.rs == Reg.r8:
             return ''
         elif self.id in (Opcode.mov, Opcode.cmp, Opcode.add):
-            return f'{self.rd.name}, {self.rs.name}'
+            return f'{self.rd.name},{self.rs.name}'
         return f'{self.rs.name}'
 
     @property
@@ -263,7 +269,7 @@ class Thumb6(ThumbInstr):  # Load PC-relative
 
     @property
     def op_str(self):
-        return f'{self.rd.name}, [pc,#{format_imm_str(self.imm * 4)}]'
+        return f'{self.rd.name},[pc,{format_imm_str(self.imm * 4)}]'
 
     @property
     def target(self):
@@ -278,7 +284,7 @@ class Thumb78(ThumbInstr):  # Load/store with register offset
 
     @property
     def op_str(self):
-        return f'{self.rd.name}, [{self.rb.name},{self.ro.name}]'
+        return f'{self.rd.name},[{self.rb.name},{self.ro.name}]'
 
 
 class Thumb910(ThumbInstr):  # Load/store with immediate offset
@@ -290,10 +296,10 @@ class Thumb910(ThumbInstr):  # Load/store with immediate offset
     @property
     def op_str(self):
         if self.id in (Opcode.strb, Opcode.ldrb):
-            return f'{self.rd.name}, [{self.rb.name},#{format_imm_str(self.imm)}]'
+            return f'{self.rd.name},[{self.rb.name}{format_mem_imm_str(self.imm)}]'
         elif self.id in (Opcode.strh, Opcode.ldrh):
-            return f'{self.rd.name}, [{self.rb.name},#{format_imm_str(self.imm*2)}]'
-        return f'{self.rd.name}, [{self.rb.name},#{format_imm_str(self.imm*4)}]'
+            return f'{self.rd.name},[{self.rb.name}{format_mem_imm_str(self.imm*2)}]'
+        return f'{self.rd.name},[{self.rb.name}{format_mem_imm_str(self.imm*4)}]'
 
 
 class Thumb11(ThumbInstr):  # Load/store SP-relative
@@ -304,7 +310,7 @@ class Thumb11(ThumbInstr):  # Load/store SP-relative
 
     @property
     def op_str(self):
-        return f'{self.rd.name}, [sp,{format_imm_str(self.imm*4)}]'
+        return f'{self.rd.name},[sp{format_mem_imm_str(self.imm*4)}]'
 
 
 class Thumb12(ThumbInstr):  # Get relative address
@@ -315,7 +321,7 @@ class Thumb12(ThumbInstr):  # Get relative address
 
     @property
     def op_str(self):
-        return f'{self.rd.name}, {self.rs.name}, #{format_imm_str(self.imm*4)}'
+        return f'{self.rd.name},{self.rs.name},{format_imm_str(self.imm*4)}'
 
     @property
     def target(self):
@@ -341,7 +347,7 @@ class Thumb13(ThumbInstr):  # Add offset to stack pointer
     def op_str(self):
         #if self.id == Opcode.sub:
         #    return f'sp, #-0x{self.imm*4:03X}'
-        return f'sp, #{format_imm_str(self.imm*4)}'
+        return f'sp,{format_imm_str(self.imm*4)}'
 
 
 class Thumb14(ThumbInstr):  # Push/pop registers
@@ -401,7 +407,7 @@ class Thumb15(ThumbInstr):  # Multiple load/store  TODO: See THUMB.15 "Strange e
         for bit in range(8):
             if self.rlist & (1 << bit):
                 regs.append(Reg(bit).name)
-        return f'{self.rb.name}!, {{{", ".join(regs)}}}'
+        return f'{self.rb.name}!,{{{", ".join(regs)}}}'
 
     def __str__(self):
         # Empty rlist or base in writeback is invalid in ARMv4 TODO: Handle invalid rlists elsewhere?
@@ -429,7 +435,7 @@ class Thumb1618(ThumbInstr):
 
     @property
     def op_str(self):
-        return f'#0x{self.target:X}'
+        return f'0x{self.target:X}'
 
 
 class Thumb17(ThumbInstr):
@@ -441,7 +447,7 @@ class Thumb17(ThumbInstr):
 
     @property
     def op_str(self):
-        return f'#{self.n:d}'
+        return f'{self.n:d}'
 
 
 class Thumb19(ThumbInstr):
@@ -457,7 +463,7 @@ class Thumb19(ThumbInstr):
 
     @property
     def op_str(self):
-        return f'#0x{self.target:X}'
+        return f'0x{self.target:X}'
 
 
 class Thumb20(ThumbInstr):
