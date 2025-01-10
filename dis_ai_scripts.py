@@ -2,6 +2,7 @@ import yaml
 import pathlib
 import difflib
 import betterdiff
+import json
 
 from luvdis import __version__
 from luvdis.config import read_config
@@ -10,14 +11,14 @@ from luvdis.rom import ROM
 from luvdis.analyze import State, BASE_ADDRESS, END_ADDRESS, THUMB, BYTE, WORD
 
 
-def disasm(rom, output, functions, debug, start, stop, macros, guess, min_calls, min_length, default_mode,
+def disasm(rom, output, functions, debug, start, stop, macros, guess, min_calls, min_length, default_mode, no_parse_functions,
            **kw):
     """ Analyze and disassemble a GBA ROM. """
     for k, v in kw.items():
         print(k, v)
     set_debug(debug)
     rom = ROM(rom, detect=False)
-    state = State(functions, min_calls, min_length, start, stop, macros, omit_extraneous=True)
+    state = State(functions, min_calls, min_length, start, stop, macros, omit_extraneous=True, no_parse_functions=no_parse_functions)
     state.analyze_rom(rom, guess)
     state.dump(rom, output, None, default_mode)
 
@@ -29,12 +30,21 @@ def generate_expected_output(ai_scripts_directory, test_basename):
     for line in lines:
         if line.strip().startswith("///"):
             asm_line = line.split("///", maxsplit=1)[1]
-            if not ((line.startswith(".") and not line.startswith(".pool")) or line.endswith(":")):
+            if asm_line.startswith(".pool") or not asm_line.startswith(".") and not asm_line.endswith(":"):
                 asm_line = f"\t{asm_line}"
 
             asm_lines.append(asm_line)
 
     return asm_lines
+
+def read_thumb_cmd_functions(ai_config):
+    aicmd_syms_filename = ai_config["aicmd_syms"]
+    with open(aicmd_syms_filename, "r") as f:
+        aicmd_syms_str_keys = json.load(f)
+
+    aicmd_syms = {int(addr_str, 16): name for addr_str, name in aicmd_syms_str_keys.items()}
+
+    return aicmd_syms
 
 def main():
     with open("ai_config.yml", "r") as f:
@@ -47,6 +57,8 @@ def main():
     ai_scripts_directory = pathlib.Path(ai_config["ai_scripts_directory"])
 
     differ = difflib.Differ()
+
+    no_parse_functions = read_thumb_cmd_functions(ai_config)
 
     for test_basename, test_start_function_name in test_basenames:
         test_dump_filename = str(dump_directory / f"{test_basename}.bin")
@@ -76,7 +88,8 @@ def main():
             guess=True,
             min_calls=1,
             min_length=1,
-            default_mode=BYTE
+            default_mode=BYTE,
+            no_parse_functions=no_parse_functions
         )
 
         expected_output = generate_expected_output(ai_scripts_directory, test_basename)

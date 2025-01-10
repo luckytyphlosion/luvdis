@@ -371,9 +371,9 @@ class CPUState:
 
 class State:
     __slots__ = ("unexpanded", "module_addrs", "functions", "not_funcs", "min_calls", "min_length", "start",
-        "stop", "macros", "debug_ranges", "call_to", "ptrs_to", "flags", "label_map", "labels", "omit_extraneous", "function_order", "branches_by_discovery_order")
+        "stop", "macros", "debug_ranges", "call_to", "ptrs_to", "flags", "label_map", "labels", "omit_extraneous", "function_order", "branches_by_discovery_order", "no_parse_functions")
 
-    def __init__(self, functions=None, min_calls=2, min_length=3, start=BASE_ADDRESS, stop=INF, macros=None, omit_extraneous=False):
+    def __init__(self, functions=None, min_calls=2, min_length=3, start=BASE_ADDRESS, stop=INF, macros=None, omit_extraneous=False, no_parse_functions=None):
         self.unexpanded = {}
         self.module_addrs = {}
         if functions:
@@ -400,6 +400,10 @@ class State:
         self.omit_extraneous = omit_extraneous
         self.function_order = {}
         self.branches_by_discovery_order = {}
+        if no_parse_functions is not None:
+            self.no_parse_functions = no_parse_functions
+        else:
+            self.no_parse_functions = {}
 
     def analyze_rom(self, rom, guess=True):  # Analyze a ROM
         if type(self.stop) is float:
@@ -751,7 +755,12 @@ class State:
                         warn(f'{addr:08X}: Missing target for "ldr {op_str}": {target:08X}')
                     value = rom.read(target, 4)
                     if self.omit_extraneous:
-                        emit = f'{ins.mnemonic} {op_str}=0x{value:x}'
+                        possible_func_name = self.no_parse_functions.get(value & ~1)
+                        if possible_func_name is not None:
+                            pool_str = possible_func_name
+                        else:
+                            pool_str = f"0x{value:x}"
+                        emit = f'{ins.mnemonic} {op_str}={pool_str}'
                     else:
                         emit = f'{ins.mnemonic} {op_str} @ =0x{value:X}'  # QOL; comment value read
                 else:

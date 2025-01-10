@@ -1,0 +1,8 @@
+test_assign_frags, AIScript_TestAssignFrags
+test_call_args, AIScript_TestCalls
+test_forward_backwards_calls, AIScript_TestForwardBackwardsCalls
+test_pools, AIScript_TestPools
+test_pools2, AIScript_TestPools2
+test_pools_new_from_displacement, AIScript_TestPoolsNewFromDisplacement
+test_cmd_args, AIScript_TestCmdArgs
+test_cond_non_call_cmd, AIScript_TestCondNonCallCmd
