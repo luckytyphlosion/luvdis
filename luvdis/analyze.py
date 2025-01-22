@@ -371,9 +371,9 @@ class CPUState:
 
 class State:
     __slots__ = ("unexpanded", "module_addrs", "functions", "not_funcs", "min_calls", "min_length", "start",
-        "stop", "macros", "debug_ranges", "call_to", "ptrs_to", "flags", "label_map", "labels", "omit_extraneous", "function_order", "branches_by_discovery_order", "no_parse_functions")
+        "stop", "macros", "debug_ranges", "call_to", "ptrs_to", "flags", "label_map", "labels", "omit_extraneous", "function_order", "branches_by_discovery_order", "no_parse_functions", "subroutine_name_lookup", "constpool_start_to_end_map", "whole_rom_as_words")
 
-    def __init__(self, functions=None, min_calls=2, min_length=3, start=BASE_ADDRESS, stop=INF, macros=None, omit_extraneous=False, no_parse_functions=None):
+    def __init__(self, functions=None, min_calls=2, min_length=3, start=BASE_ADDRESS, stop=INF, macros=None, omit_extraneous=False, no_parse_functions=None, subroutine_name_lookup=None, constpool_start_to_end_map=None, whole_rom_as_words=None):
         self.unexpanded = {}
         self.module_addrs = {}
         if functions:
@@ -404,6 +404,18 @@ class State:
             self.no_parse_functions = no_parse_functions
         else:
             self.no_parse_functions = {}
+
+        if subroutine_name_lookup is not None:
+            self.subroutine_name_lookup = subroutine_name_lookup
+        else:
+            self.subroutine_name_lookup = {}
+
+        if constpool_start_to_end_map is not None:
+            self.constpool_start_to_end_map = constpool_start_to_end_map
+        else:
+            self.constpool_start_to_end_map = {}
+
+        self.whole_rom_as_words = whole_rom_as_words            
 
     def analyze_rom(self, rom, guess=True):  # Analyze a ROM
         if type(self.stop) is float:
@@ -611,7 +623,12 @@ class State:
                 name, _ = self.functions[addr]
                 if name is None:
                     if self.omit_extraneous:
-                        name = f'AIScript_sub{self.function_order[addr]}'
+                        function_index = self.function_order[addr]
+                        subroutine_name_base = self.subroutine_name_lookup.get(function_index)
+                        if subroutine_name_base is not None:
+                            name = f"call_{subroutine_name_base}"
+                        else:
+                            name = f'AIScript_sub{function_index}'
                     else:
                         name = f'sub_{addr:07X}'
                 return name
@@ -759,7 +776,15 @@ class State:
                         if possible_func_name is not None:
                             pool_str = possible_func_name
                         else:
-                            pool_str = f"0x{value:x}"
+                            possible_constpool_end_addr = self.constpool_start_to_end_map.get(value)
+                            if possible_constpool_end_addr is not None:
+                                possible_constpool_start_addr_word_unit = (value - 0x8000000) // 4
+                                possible_constpool_end_addr_word_unit = (possible_constpool_end_addr - 0x8000000) // 4
+                                num_constpool_words = possible_constpool_end_addr_word_unit - possible_constpool_start_addr_word_unit
+
+                                pool_str = f"<{', '.join(hex(self.whole_rom_as_words[i]) for i in range(possible_constpool_start_addr_word_unit, possible_constpool_end_addr_word_unit))}>"
+                            else:
+                                pool_str = f"0x{value:x}"
                         emit = f'{ins.mnemonic} {op_str}={pool_str}'
                     else:
                         emit = f'{ins.mnemonic} {op_str} @ =0x{value:X}'  # QOL; comment value read
