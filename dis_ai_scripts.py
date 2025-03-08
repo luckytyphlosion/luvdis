@@ -30,7 +30,18 @@ def generate_expected_output_and_subroutine_name_lookup(ai_scripts_directory, te
     with open(ai_scripts_directory / f"{test_basename}.ai", "r") as f:
         lines = f.read().splitlines()
 
+    is_in_comment = False
+
     for line in lines:
+        if "/*" in line:
+            is_in_comment = True
+        if "*/" in line:
+            is_in_comment = False
+            continue
+
+        if is_in_comment:
+            continue
+
         stripped_line = line.strip()
         if stripped_line.startswith("///"):
             asm_line = line.split("///", maxsplit=1)[1]
@@ -86,6 +97,8 @@ def main():
     whole_rom_as_words = struct.unpack(f"<{len(whole_rom) // 4}I", whole_rom)
 
     for test_basename, test_start_function_name in test_basenames:
+        if test_basename.startswith("#"):
+            continue
         test_dump_filename = str(dump_directory / f"{test_basename}.bin")
         test_info_filepath = dump_directory / f"{test_basename}.txt"
         addr_map = {}

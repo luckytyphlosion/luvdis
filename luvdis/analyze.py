@@ -371,7 +371,7 @@ class CPUState:
 
 class State:
     __slots__ = ("unexpanded", "module_addrs", "functions", "not_funcs", "min_calls", "min_length", "start",
-        "stop", "macros", "debug_ranges", "call_to", "ptrs_to", "flags", "label_map", "labels", "omit_extraneous", "function_order", "branches_by_discovery_order", "no_parse_functions", "subroutine_name_lookup", "constpool_start_to_end_map", "whole_rom_as_words")
+        "stop", "macros", "debug_ranges", "call_to", "ptrs_to", "flags", "label_map", "labels", "omit_extraneous", "function_order", "branches_by_discovery_order_addr", "no_parse_functions", "subroutine_name_lookup", "constpool_start_to_end_map", "whole_rom_as_words", "branches_by_discovery_order")
 
     def __init__(self, functions=None, min_calls=2, min_length=3, start=BASE_ADDRESS, stop=INF, macros=None, omit_extraneous=False, no_parse_functions=None, subroutine_name_lookup=None, constpool_start_to_end_map=None, whole_rom_as_words=None):
         self.unexpanded = {}
@@ -399,6 +399,7 @@ class State:
         self.label_map = {}
         self.omit_extraneous = omit_extraneous
         self.function_order = {}
+        self.branches_by_discovery_order_addr = {}
         self.branches_by_discovery_order = {}
         if no_parse_functions is not None:
             self.no_parse_functions = no_parse_functions
@@ -492,7 +493,7 @@ class State:
         initial_addr = addr
         expanded = {}  # Start addresses -> exit behavior seen so far
         labels = {}  # Addresses -> label type
-        branches_by_discovery_order = {}
+        branches_by_discovery_order_addr = {}
         calls = {}  # Addresses -> call state
         ranges = []  # List of (start:end) tuples of executable regions
         while starts:  # Continue as long as there are paths to explore
@@ -517,8 +518,8 @@ class State:
                         target = ins.target
                         end = addr = ins.address+2
                         if target < self.stop:
-                            if target not in branches_by_discovery_order:
-                                branches_by_discovery_order[target] = len(branches_by_discovery_order)
+                            if target not in branches_by_discovery_order_addr:
+                                branches_by_discovery_order_addr[target] = ins.address
 
                             labels[target] = BRANCH
                             if target not in expanded:  # Add target as start
@@ -579,20 +580,20 @@ class State:
         # Tally exit behaviors
         exits = [1 if behavior else 0 for behavior in expanded.values() if behavior is not None]
         total, exited = len(exits), sum(exits)
-        return exited, total, labels, branches_by_discovery_order, calls, ranges
+        return exited, total, labels, branches_by_discovery_order_addr, calls, ranges
 
     def analyze_funcs(self, rom, threshold=0.5):
         changed = False
         new_unexpanded = {}
         for func, name in self.unexpanded.items():
-            exited, total, labels, branches_by_discovery_order, calls, ranges = self.analyze_func(rom, func)
+            exited, total, labels, branches_by_discovery_order_addr, calls, ranges = self.analyze_func(rom, func)
             if (total and exited/total < threshold) or (total == 0 != threshold):
                 if total == 0:
                     dprint(f"0x{func:07x} has 0 total exits")
                 self.not_funcs.add(func)
                 continue
             self.label_map.update(labels)
-            self.branches_by_discovery_order.update(branches_by_discovery_order)
+            self.branches_by_discovery_order_addr.update(branches_by_discovery_order_addr)
             for start, end, flag in ranges:
                 self.flags[start:end] |= flag
                 if DEBUG and (flag & FLAG_EXEC):  # Track executable ranges for debugging
@@ -616,6 +617,7 @@ class State:
         
         func_labels = [func for func, label_type in self.label_map.items() if label_type == FUNC]
         self.function_order = {func: i for i, func in enumerate(func_labels)}
+        self.branches_by_discovery_order = {addr: i for i, (addr, branch_insn_addr) in enumerate(sorted(self.branches_by_discovery_order_addr.items(), key=lambda x: x[1]))}
 
     def label_for(self, addr):
         if addr in self.label_map:
