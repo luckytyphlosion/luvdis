@@ -14,11 +14,11 @@ from luvdis.analyze import State, BASE_ADDRESS, END_ADDRESS, THUMB, BYTE, WORD
 
 subroutine_prototype_regex = re.compile(r"^AIScript_(\w+)\([^\)]*\)[^;]*$")
 
-def disasm(rom, output, functions, debug, start, stop, macros, guess, min_calls, min_length, default_mode, no_parse_functions, subroutine_name_lookup, constpool_start_to_end_map, whole_rom_as_words):
+def disasm(rom, output, functions, debug, start, stop, macros, guess, min_calls, min_length, default_mode, no_parse_functions, subroutine_name_lookup, constpool_start_to_end_map, whole_rom_as_words, show_insn_addr_comments, consolidate_cond_jumps):
     """ Analyze and disassemble a GBA ROM. """
     set_debug(debug)
     rom = ROM(rom, detect=False)
-    state = State(functions, min_calls, min_length, start, stop, macros, omit_extraneous=True, no_parse_functions=no_parse_functions, subroutine_name_lookup=subroutine_name_lookup, constpool_start_to_end_map=constpool_start_to_end_map, whole_rom_as_words=whole_rom_as_words)
+    state = State(functions, min_calls, min_length, start, stop, macros, omit_extraneous=True, no_parse_functions=no_parse_functions, subroutine_name_lookup=subroutine_name_lookup, constpool_start_to_end_map=constpool_start_to_end_map, whole_rom_as_words=whole_rom_as_words, show_insn_addr_comments=show_insn_addr_comments, consolidate_cond_jumps=consolidate_cond_jumps)
     state.analyze_rom(rom, guess)
     state.dump(rom, output, None, default_mode)
 
@@ -95,6 +95,8 @@ def main():
         whole_rom = f.read()
 
     whole_rom_as_words = struct.unpack(f"<{len(whole_rom) // 4}I", whole_rom)
+    show_insn_addr_comments = ai_config["show_insn_addr_comments"]
+    consolidate_cond_jumps = ai_config["consolidate_cond_jumps"]
 
     for test_basename, test_start_function_name in test_basenames:
         if test_basename.startswith("#"):
@@ -132,10 +134,10 @@ def main():
             no_parse_functions=no_parse_functions,
             subroutine_name_lookup=subroutine_name_lookup,
             constpool_start_to_end_map=constpool_start_to_end_map,
-            whole_rom_as_words=whole_rom_as_words
+            whole_rom_as_words=whole_rom_as_words,
+            show_insn_addr_comments=show_insn_addr_comments,
+            consolidate_cond_jumps=consolidate_cond_jumps
         )
-
-
 
         with open(output_filename, "r") as f:
             actual_output = [line for line in f.read().splitlines() if line != ""]

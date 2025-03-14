@@ -106,6 +106,8 @@ class Opcode(IntEnum):
 BRANCHES = {Opcode.beq, Opcode.bne, Opcode.bcs, Opcode.bcc, Opcode.bmi, Opcode.bpl, Opcode.bvs, Opcode.bvc,
             Opcode.bhi, Opcode.bls, Opcode.bge, Opcode.blt, Opcode.bgt, Opcode.ble, Opcode.b}
 
+CONDITIONAL_BRANCHES = {Opcode.beq, Opcode.bne, Opcode.bcs, Opcode.bcc, Opcode.bmi, Opcode.bpl, Opcode.bvs, Opcode.bvc,
+            Opcode.bhi, Opcode.bls, Opcode.bge, Opcode.blt, Opcode.bgt, Opcode.ble}
 
 # See GBATEK: https://problemkaputt.de/gbatek.htm#thumbinstructionsummary
 

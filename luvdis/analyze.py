@@ -13,7 +13,7 @@ from luvdis import __version__
 from luvdis.common import DEBUG, eprint, warn, dprint
 from luvdis.config import write_config
 from luvdis.rom import ROM
-from luvdis.disasm import disasm, Opcode, Reg, BRANCHES
+from luvdis.disasm import disasm, Opcode, Reg, BRANCHES, CONDITIONAL_BRANCHES
 from luvdis.disasm import Thumb1, Thumb2, Thumb3, Thumb4, Thumb5, Thumb6, Thumb78, Thumb910, Thumb11, Thumb12, Thumb13
 
 
@@ -371,13 +371,15 @@ class CPUState:
 
 class State:
     __slots__ = ("unexpanded", "module_addrs", "functions", "not_funcs", "min_calls", "min_length", "start",
-        "stop", "macros", "debug_ranges", "call_to", "ptrs_to", "flags", "label_map", "labels", "omit_extraneous", "function_order", "branches_by_discovery_order_addr", "no_parse_functions", "subroutine_name_lookup", "constpool_start_to_end_map", "whole_rom_as_words", "branches_by_discovery_order")
+        "stop", "macros", "debug_ranges", "call_to", "ptrs_to", "flags", "label_map", "labels", "omit_extraneous", "function_order", "branches_by_discovery_order_addr", "no_parse_functions", "subroutine_name_lookup", "constpool_start_to_end_map", "whole_rom_as_words", "branch_label_names", "show_insn_addr_comments", "start_func_addr", "consolidate_cond_jumps", "branches_by_insn_addr")
 
-    def __init__(self, functions=None, min_calls=2, min_length=3, start=BASE_ADDRESS, stop=INF, macros=None, omit_extraneous=False, no_parse_functions=None, subroutine_name_lookup=None, constpool_start_to_end_map=None, whole_rom_as_words=None):
+    def __init__(self, functions=None, min_calls=2, min_length=3, start=BASE_ADDRESS, stop=INF, macros=None, omit_extraneous=False, no_parse_functions=None, subroutine_name_lookup=None, constpool_start_to_end_map=None, whole_rom_as_words=None, show_insn_addr_comments=False, consolidate_cond_jumps=False):
         self.unexpanded = {}
         self.module_addrs = {}
         if functions:
+            self.start_func_addr = 0xffffffff
             for addr, value in functions.items():
+                self.start_func_addr = min(addr, self.start_func_addr)
                 if type(value) is tuple:
                     name, module = value
                     if module:
@@ -385,6 +387,8 @@ class State:
                 else:
                     name = value
                 self.unexpanded[addr] = name
+        else:
+            self.start_func_addr = 0
         self.functions = {}  # addr -> (name, end_address)
         self.not_funcs = set()
         self.min_calls, self.min_length, self.start, self.stop = min_calls, min_length, start, stop
@@ -400,7 +404,7 @@ class State:
         self.omit_extraneous = omit_extraneous
         self.function_order = {}
         self.branches_by_discovery_order_addr = {}
-        self.branches_by_discovery_order = {}
+        self.branch_label_names = {}
         if no_parse_functions is not None:
             self.no_parse_functions = no_parse_functions
         else:
@@ -416,7 +420,10 @@ class State:
         else:
             self.constpool_start_to_end_map = {}
 
-        self.whole_rom_as_words = whole_rom_as_words            
+        self.whole_rom_as_words = whole_rom_as_words
+        self.show_insn_addr_comments = show_insn_addr_comments
+        self.consolidate_cond_jumps = consolidate_cond_jumps
+        self.branches_by_insn_addr = {}
 
     def analyze_rom(self, rom, guess=True):  # Analyze a ROM
         if type(self.stop) is float:
@@ -494,6 +501,7 @@ class State:
         expanded = {}  # Start addresses -> exit behavior seen so far
         labels = {}  # Addresses -> label type
         branches_by_discovery_order_addr = {}
+        branches_by_insn_addr = {}
         calls = {}  # Addresses -> call state
         ranges = []  # List of (start:end) tuples of executable regions
         while starts:  # Continue as long as there are paths to explore
@@ -518,9 +526,11 @@ class State:
                         target = ins.target
                         end = addr = ins.address+2
                         if target < self.stop:
-                            if target not in branches_by_discovery_order_addr:
+                            target_existing_ins_address = branches_by_discovery_order_addr.get(target, 0xffffffff)
+                            if target_existing_ins_address > ins.address:
                                 branches_by_discovery_order_addr[target] = ins.address
 
+                            branches_by_insn_addr[ins.address] = ins.id
                             labels[target] = BRANCH
                             if target not in expanded:  # Add target as start
                                 new_starts[target] = state.copy()
@@ -580,13 +590,13 @@ class State:
         # Tally exit behaviors
         exits = [1 if behavior else 0 for behavior in expanded.values() if behavior is not None]
         total, exited = len(exits), sum(exits)
-        return exited, total, labels, branches_by_discovery_order_addr, calls, ranges
+        return exited, total, labels, branches_by_discovery_order_addr, calls, ranges, branches_by_insn_addr
 
     def analyze_funcs(self, rom, threshold=0.5):
         changed = False
         new_unexpanded = {}
         for func, name in self.unexpanded.items():
-            exited, total, labels, branches_by_discovery_order_addr, calls, ranges = self.analyze_func(rom, func)
+            exited, total, labels, branches_by_discovery_order_addr, calls, ranges, branches_by_insn_addr = self.analyze_func(rom, func)
             if (total and exited/total < threshold) or (total == 0 != threshold):
                 if total == 0:
                     dprint(f"0x{func:07x} has 0 total exits")
@@ -594,6 +604,7 @@ class State:
                 continue
             self.label_map.update(labels)
             self.branches_by_discovery_order_addr.update(branches_by_discovery_order_addr)
+            self.branches_by_insn_addr.update(branches_by_insn_addr)
             for start, end, flag in ranges:
                 self.flags[start:end] |= flag
                 if DEBUG and (flag & FLAG_EXEC):  # Track executable ranges for debugging
@@ -617,7 +628,28 @@ class State:
         
         func_labels = [func for func, label_type in self.label_map.items() if label_type == FUNC]
         self.function_order = {func: i for i, func in enumerate(func_labels)}
-        self.branches_by_discovery_order = {addr: i for i, (addr, branch_insn_addr) in enumerate(sorted(self.branches_by_discovery_order_addr.items(), key=lambda x: x[1]))}
+        self.branch_label_names = {}
+        branch_index = 0
+        pool_branch_index = 0
+        long_conditional_branch_index = 0
+        for target_addr, discovery_addr in sorted(self.branches_by_discovery_order_addr.items(), key=lambda x: x[1]):
+            # easier way to deal with long conditional branches
+            if self.consolidate_cond_jumps and self.branches_by_insn_addr[discovery_addr] in CONDITIONAL_BRANCHES and self.branches_by_insn_addr.get(discovery_addr + 2) == Opcode.b and not self.flags[discovery_addr + 4] & FLAG_WORD:
+                self.branch_label_names[target_addr] = f".lclabel{long_conditional_branch_index}"
+                long_conditional_branch_index += 1
+            # for a branch, if the next instruction is actually a word
+            # then assume it's a pool
+            # only the first discovery addr is logged, so if we find a branch
+            # that's also shared with a pool branch
+            # then it's fine that the label isn't labelled as a pool branch
+            # since we need that label index anyway
+            elif self.flags[discovery_addr + 2] & FLAG_WORD:
+                self.branch_label_names[target_addr] = f".plabel{pool_branch_index}"
+                pool_branch_index += 1
+            else:
+                print(f"set .label{branch_index} at 0x{target_addr:03x} (discovered at 0x{discovery_addr - self.start_func_addr:03x})")
+                self.branch_label_names[target_addr] = f".label{branch_index}"
+                branch_index += 1
 
     def label_for(self, addr):
         if addr in self.label_map:
@@ -637,7 +669,7 @@ class State:
 
         if self.omit_extraneous and self.label_map.get(addr) == BRANCH:
             try:
-                return f".label{self.branches_by_discovery_order[addr]}"
+                return self.branch_label_names[addr]
             except KeyError:
                 raise RuntimeError(f"label_for branch addr not found. addr: {addr}, self.label_map: {self.label_map}")
         else:
@@ -798,7 +830,7 @@ class State:
 
                 if label:
                     f.write(f'{label}{comment}\n')
-                f.write(f'\t{emit} @ {addr:07X}\n' if DEBUG else f'\t{emit}\n')
+                f.write(f'\t{emit} @ {addr - self.start_func_addr:07X}\n' if self.show_insn_addr_comments else f'\t{emit}\n')
             elif mode == WORD:
                 offset = 4
                 value = rom.read(addr, 4)

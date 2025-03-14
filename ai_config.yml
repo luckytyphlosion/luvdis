@@ -4,3 +4,5 @@ ai_scripts_directory: "../pokemonomyth/data/ai"
 aicmd_syms: "../pokemonomyth/aicmd_syms.dump"
 constpool_start_to_end_map_filename: "../pokemonomyth/ai_constpool_start_to_end_map.dump"
 whole_rom_filename: "../pokemonomyth/pokemonomyth_ai.gba"
+show_insn_addr_comments: false
+consolidate_cond_jumps: true
