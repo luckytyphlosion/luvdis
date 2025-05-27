@@ -647,7 +647,7 @@ class State:
                 self.branch_label_names[target_addr] = f".plabel{pool_branch_index}"
                 pool_branch_index += 1
             else:
-                print(f"set .label{branch_index} at 0x{target_addr:03x} (discovered at 0x{discovery_addr - self.start_func_addr:03x})")
+                #print(f"set .label{branch_index} at 0x{target_addr:03x} (discovered at 0x{discovery_addr - self.start_func_addr:03x})")
                 self.branch_label_names[target_addr] = f".label{branch_index}"
                 branch_index += 1
 

@@ -1,10 +1,17 @@
 # Code licensed LGPLv3 by Jérémie Lumbroso <lumbroso@cs.princeton.edu>
 
+# some changes made by luckytyphlosion
+# specific to diffing ai script dumps
+# those changes are under MIT
+
 import difflib
 import itertools
 import textwrap
 import typing
+import re
 
+# space TAB
+SAB = "        "
 
 def side_by_side(
     left: typing.List[str],
@@ -83,6 +90,129 @@ def side_by_side(
 
     return lines
 
+branch_bytes_regex = re.compile(rf"{SAB}\.byte 0x[0-9a-fA-F]+, 0xE0")
+cond_branch_label_regex = re.compile(rf"{SAB}b(eq|ne|gt|ge|lt|le) (\.label\d+)")
+cond_branch_lclabel_regex = re.compile(rf"{SAB}b(eq|ne|gt|ge|lt|le) (\.lclabel\d+)")
+beq_label_regex = re.compile(rf"{SAB}beq (\.label\d+)")
+bne_label_regex = re.compile(rf"{SAB}bne (\.label\d+)")
+bgt_label_regex = re.compile(rf"{SAB}bgt (\.label\d+)")
+bge_label_regex = re.compile(rf"{SAB}bge (\.label\d+)")
+blt_label_regex = re.compile(rf"{SAB}blt (\.label\d+)")
+ble_label_regex = re.compile(rf"{SAB}ble (\.label\d+)")
+
+branch_cond_to_inverse_cond_regex = {
+    "eq": bne_label_regex,
+    "ne": beq_label_regex,
+    "gt": ble_label_regex,
+    "ge": blt_label_regex,
+    "lt": bge_label_regex,
+    "le": bgt_label_regex,
+}
+
+pool_branch_regex = re.compile(rf"{SAB}b (\.plabel\d+)")
+unused_2_bytes_regex = re.compile(rf"{SAB}\.byte 0x[0-9A-Fa-f]+, 0x[0-9A-Fa-f]+")
+
+#beq_lclabel_regex = re.compile(rf"{SAB}beq .lclabel(\d+)")
+#bne_lclabel_regex = re.compile(rf"{SAB}bne .lclabel(\d+)")
+#bgt_lclabel_regex = re.compile(rf"{SAB}bgt .lclabel(\d+)")
+#bge_lclabel_regex = re.compile(rf"{SAB}bge .lclabel(\d+)")
+#blt_lclabel_regex = re.compile(rf"{SAB}blt .lclabel(\d+)")
+#ble_lclabel_regex = re.compile(rf"{SAB}ble .lclabel(\d+)")
+#
+#lc_branch_cond_to_inverse_cond_regex = {
+#    "eq": beq_lclabel_regex,
+#    "ne": bne_lclabel_regex,
+#    "gt": bgt_lclabel_regex,
+#    "ge": bge_lclabel_regex,
+#    "lt": blt_lclabel_regex,
+#    "le": ble_lclabel_regex,
+#}
+
+# non-functional, has side effects
+# returns # of lines to advance
+def try_ignore_long_conditional_branch_diff_and_pool_branch(left_side, right_side, index):
+    #if index + 4 > len(left_side):
+    #    return 1
+
+    
+    #    print(f"left_side[index]: {left_side[index]}")
+
+
+    # check - signs first because they're easy to check
+    if left_side[index] == "-" and right_side[index + 1] == "-" and left_side[index + 2] == "-":
+        line_rel_3_equal = (left_side[index + 3] == right_side[index + 3])
+        if left_side[index + 3] == "-" or line_rel_3_equal:
+            if line_rel_3_equal:
+                cond_branch_regex = cond_branch_label_regex
+            else:
+                cond_branch_regex = cond_branch_lclabel_regex
+
+            if (match_obj := cond_branch_regex.match(right_side[index])):
+                #if index == 243:
+                #    print("index 243 passed first check")
+                branch_cond = match_obj.group(1)
+                small_branch_label = match_obj.group(2)
+                inverse_cond_regex = branch_cond_to_inverse_cond_regex[branch_cond]
+    
+                if (match_obj := inverse_cond_regex.match(left_side[index + 1])):
+                    cond_label_if_no_long_branch = match_obj.group(1)
+                    #if index == 243:
+                        #print("index 243 passed second check")
+                        #print(f"right_side[index + 2]: {right_side[index + 2]}\nright_side[index + 3]: {right_side[index + 3]}\ncond_label_if_no_long_branch: {cond_label_if_no_long_branch}\nsmall_branch_label: {small_branch_label}")
+                        #print(f"right side + 2 first char: {ord(right_side[index + 2][0])}")
+                        #print("check1: " + str(right_side[index + 2] == f"{SAB}b {cond_label_if_no_long_branch}"))
+    
+                    if right_side[index + 2] == f"{SAB}b {cond_label_if_no_long_branch}" and right_side[index + 3] == small_branch_label:
+                        #print(f"all checks passed")
+                        left_side[index] = "*"
+                        right_side[index + 1] = "*"
+                        left_side[index + 2] = "*"
+                        if not line_rel_3_equal:
+                            left_side[index + 3] = "*"
+                        return index + 4
+
+    # long conditional branch failed, try pool diff
+    if left_side[index] == "-" and left_side[index + 1] == "-" and left_side[index + 2] == "-":
+        # check the pool branch and the pool itself
+        if right_side[index + 1] == f"{SAB}.pool" and (match_obj := pool_branch_regex.match(right_side[index])):
+            # pool diff can either have two unused bytes or not after the pool
+            # check for these
+            pool_branch_label = match_obj.group(1)
+            if unused_2_bytes_regex.match(right_side[index + 2]):
+                if left_side[index + 3] == "-" and right_side[index + 3] == pool_branch_label:
+                    left_side[index] = "*"
+                    left_side[index + 1] = "*"
+                    left_side[index + 2] = "*"
+                    left_side[index + 3] = "*"
+                    return index + 4
+            elif right_side[index + 2] == pool_branch_label:
+                left_side[index] = "*"
+                left_side[index + 1] = "*"
+                left_side[index + 2] = "*"
+                return index + 3
+
+    return index + 1
+
+def patch_left_side_right_side_diff(left_side, right_side):
+    # first line is sometimes the 2 padding bytes required as the first function starts on a non-word aligned address
+    # don't track this as a diff
+    if left_side[0] == "-" and right_side[0] == f"{SAB}.byte 0x0, 0x0":
+        left_side[0] = "*"
+
+    # last two lines are sometimes the final pool and the branch bytes
+    # don't track this as a diff
+    if left_side[-2] == "-" and left_side[-1] == "-" and branch_bytes_regex.match(right_side[-2]) and right_side[-1] == f"{SAB}.pool":
+        left_side[-2] = "*"
+        left_side[-1] = "*"
+
+    index = 0
+
+    lines_len_minus_4 = len(left_side) - 4
+    
+    while index <= lines_len_minus_4:
+        index = try_ignore_long_conditional_branch_diff_and_pool_branch(left_side, right_side, index)
+
+    return left_side, right_side
 
 def better_diff(
     left: typing.List[str],
@@ -122,9 +252,21 @@ def better_diff(
     # LINK: https://stackoverflow.com/a/66091742/408734
     difflines = list(differ.compare(left, right))
 
-    for line in difflines:
+    #with open("betterdiff_difflines.dump", "w+") as f:
+    #    f.write("\n".join(difflines) + "\n")
+
+    longest_len = 0
+
+    for i, line in enumerate(difflines):
         op = line[0]
         tail = line[2:]
+        if tail[0] == "\t":
+            tail = f"{SAB}{tail[1:]}"
+
+        tail_len = len(tail)
+        if tail_len > longest_len:
+            longest_len = tail_len
+
         if op == " ":
             # line is same in both
             left_side.append(tail)
@@ -139,6 +281,17 @@ def better_diff(
             # line is only on the right
             left_side.append("-")
             right_side.append(tail)
+
+    #with open("betterdiff_leftside.dump", "w+") as f:
+    #    f.write("\n".join(left_side) + "\n")
+    #
+    #with open("betterdiff_rightside.dump", "w+") as f:
+    #    f.write("\n".join(right_side) + "\n")
+
+    left_side, right_side = patch_left_side_right_side_diff(left_side, right_side)
+
+    if width == -1:
+        width = (longest_len + 2) * 2
 
     return side_by_side(
         left=left_side,
