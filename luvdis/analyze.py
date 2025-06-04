@@ -426,10 +426,10 @@ class State:
         self.branches_by_insn_addr = {}
 
     def analyze_rom(self, rom, guess=True):  # Analyze a ROM
-        if type(self.stop) is float:
-            eprint(f'Disassembling from 0x{self.start:08X}:')
-        else:
-            eprint(f'Disassembling from 0x{self.start:08X}:0x{self.stop:08X}')
+        #if type(self.stop) is float:
+        #    eprint(f'Disassembling from 0x{self.start:08X}:')
+        #else:
+        #    eprint(f'Disassembling from 0x{self.start:08X}:0x{self.stop:08X}')
         pushes = set()  # Set of push {xx, lr} addresses
         self.flags = RomFlags(rom.size)
         for ins in rom.dist(self.start):
@@ -444,7 +444,10 @@ class State:
                 pushes.add(addr)
             # THUMB.19
             elif ins.id == Opcode.bl:
-                self.call_to[ins.target].add(addr)
+                target = ins.target
+                target_first_insn = rom.read(target, size=2)
+                if target_first_insn == 0xb500:
+                    self.call_to[ins.target].add(addr)
 
         # Find all function pointers
         # Really only applies to MMBN because function pointers are always in .text
@@ -455,7 +458,7 @@ class State:
                 self.ptrs_to[ptr & ~0x1].add(addr)
 
         # Expand all provided functions
-        eprint(f'{len(self.unexpanded)} functions provided')
+        #eprint(f'{len(self.unexpanded)} functions provided')
         changed = self.analyze_funcs(rom, 0)
         if not guess:  # Stop here if not guessing
             self.make_labels(rom)
@@ -463,7 +466,7 @@ class State:
         # Repeatedly expand and find new functions
         while changed:
             changed = self.analyze_funcs(rom, 0)  # TODO: Add configurable threshold
-        eprint(f'Found {len(self.functions)} functions')
+        #eprint(f'Found {len(self.functions)} functions')
         # Guess functions based on push-bl intersection
         self.guess_funcs(rom, pushes)
         changed = True
@@ -472,11 +475,11 @@ class State:
         eprint(f'Found {len(self.functions)} functions')
         # TODO: library detection
         # TODO: Reverse call searching
-        dprint(f'{len(self.not_funcs)} not-funcs')
+        #dprint(f'{len(self.not_funcs)} not-funcs')
         self.make_labels(rom)
 
     def guess_funcs(self, rom, entries):  # Guess functions based on number of calls and code length
-        dprint("Guessing funcs!")
+        #dprint("Guessing funcs!")
         dicts = (self.functions, self.unexpanded, self.not_funcs)
         for maybe_func in entries:
             if maybe_func < self.stop and all(maybe_func not in d for d in dicts):
@@ -543,11 +546,24 @@ class State:
                             break
                     elif ins.id == Opcode.bl:
                         target = ins.target
+                        target_first_insn = rom.read(target, size=2)
                         end = addr = ins.address+4
                         if target < self.stop:
-                            labels[target] = BRANCH
-                            calls[target] = state.copy()  # Copy state to start of function
-                            exit_behaved = None
+                            if target_first_insn == 0xb500:
+                                labels[target] = BRANCH
+                                calls[target] = state.copy()  # Copy state to start of function
+                                exit_behaved = None
+                            else:
+                                #print(f"Found non push {{lr}} inst for bl: 0x{target_first_insn:04x} at {targe}")
+                                target_existing_ins_address = branches_by_discovery_order_addr.get(target, 0xffffffff)
+                                if target_existing_ins_address > ins.address:
+                                    branches_by_discovery_order_addr[target] = ins.address
+                                branches_by_insn_addr[ins.address] = ins.id
+                                labels[target] = BRANCH
+                                if target not in expanded:  # Add target as start
+                                    new_starts[target] = state.copy()
+                                exit_behaved = None
+                                break
                         else:
                             dprint(f"oob call: initial_addr: 0x{initial_addr:07x}")
                             exit_behaved = False  # Calling an OOB function is misbehavior
@@ -590,6 +606,7 @@ class State:
         # Tally exit behaviors
         exits = [1 if behavior else 0 for behavior in expanded.values() if behavior is not None]
         total, exited = len(exits), sum(exits)
+        #print(f"calls on analyze_func exit: {calls}")
         return exited, total, labels, branches_by_discovery_order_addr, calls, ranges, branches_by_insn_addr
 
     def analyze_funcs(self, rom, threshold=0.5):
@@ -603,6 +620,7 @@ class State:
                 self.not_funcs.add(func)
                 continue
             self.label_map.update(labels)
+            #print(f"analyze_funcs self.label_map: {self.label_map}")
             self.branches_by_discovery_order_addr.update(branches_by_discovery_order_addr)
             self.branches_by_insn_addr.update(branches_by_insn_addr)
             for start, end, flag in ranges:
@@ -614,6 +632,7 @@ class State:
                     new_unexpanded[target] = None
                     changed = True
             self.functions[func] = (name, None)  # TODO: Track the ends of functions?
+            #print(f"analyze_funcs self.unexpanded: {self.unexpanded}")
         self.unexpanded = new_unexpanded
         return changed
 
@@ -621,6 +640,7 @@ class State:
         return f'{len(self.functions)}:{len(self.unexpanded)} c:{self.min_calls} l:{self.min_length}'
 
     def make_labels(self, rom):  # Generate labels
+        #print(f"make_labels self.functions: {self.functions}")
         for func in self.functions:
             self.label_map[func] = FUNC
         self.labels = list(self.label_map.keys())
@@ -634,7 +654,7 @@ class State:
         long_conditional_branch_index = 0
         for target_addr, discovery_addr in sorted(self.branches_by_discovery_order_addr.items(), key=lambda x: x[1]):
             # easier way to deal with long conditional branches
-            if self.consolidate_cond_jumps and self.branches_by_insn_addr[discovery_addr] in CONDITIONAL_BRANCHES and self.branches_by_insn_addr.get(discovery_addr + 2) == Opcode.b and not self.flags[discovery_addr + 4] & FLAG_WORD:
+            if self.consolidate_cond_jumps and self.branches_by_insn_addr[discovery_addr] in CONDITIONAL_BRANCHES and self.branches_by_insn_addr.get(discovery_addr + 2) in {Opcode.b, Opcode.bl} and not self.flags[discovery_addr + 4] & FLAG_WORD:
                 self.branch_label_names[target_addr] = f".lclabel{long_conditional_branch_index}"
                 long_conditional_branch_index += 1
             # for a branch, if the next instruction is actually a word
@@ -653,6 +673,8 @@ class State:
 
     def label_for(self, addr):
         if addr in self.label_map:
+            #if addr == 18990:
+            #    print(f"label_for self.label_map[18990]: {self.label_map[addr]}")
             if self.label_map[addr] == FUNC:
                 name, _ = self.functions[addr]
                 if name is None:
@@ -760,7 +782,7 @@ class State:
                 if new_module != module or f is None:  # Entering new/first module
                     module = new_module
                     path = os.path.join(folder, module)
-                    eprint(f"{addr:08X}: module '{path}'")
+                    #eprint(f"{addr:08X}: module '{path}'")
                     bar.set_description(module + ' '*max(0, module_len-len(module)))
                     module_len = max(module_len, len(module))
                     if f:

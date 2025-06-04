@@ -28,6 +28,7 @@ import betterdiff
 import json
 import re
 import struct
+import argparse
 
 from luvdis import __version__
 from luvdis.config import read_config
@@ -101,6 +102,12 @@ def read_constpool_start_to_end_map(ai_config):
     return constpool_start_to_end_map
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("auto_width", nargs="?", help="Whether to expand the diff width to avoid wrapping.")
+    args = ap.parse_args()
+
+    auto_width = -1 if args.auto_width else 78
+
     with open("ai_config.yml", "r") as f:
         ai_config = yaml.safe_load(f)
 
@@ -124,6 +131,7 @@ def main():
     for test_basename, test_start_function_name in test_basenames:
         if test_basename.startswith("#"):
             continue
+        print(f"== TEST {test_basename} ==") 
         test_dump_filename = str(dump_directory / f"{test_basename}.bin")
         test_info_filepath = dump_directory / f"{test_basename}.txt"
         addr_map = {}
@@ -165,9 +173,14 @@ def main():
         with open(output_filename, "r") as f:
             actual_output = [line for line in f.read().splitlines() if line != ""]
 
-        delta = betterdiff.better_diff(expected_output, actual_output, as_string=True)
+        num_diffs, delta = betterdiff.better_diff(expected_output, actual_output, as_string=True, width=auto_width)
         with open(f"output/{test_basename}_result.dump", "w+") as f:
             f.write(delta)
+
+        if num_diffs == 0:
+            print(f"PASSED!\n")
+        else:
+            print(f"FAILED! {num_diffs} diffs found!\n")
 
 if __name__ == "__main__":
     main()

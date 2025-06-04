@@ -110,6 +110,9 @@ branch_cond_to_inverse_cond_regex = {
 }
 
 pool_branch_regex = re.compile(rf"{SAB}b (\.plabel\d+)")
+branch_regex = re.compile(rf"{SAB}b (\.label\d+)")
+super_long_branch_regex = re.compile(rf"{SAB}bl (\.label\d+)")
+
 unused_2_bytes_regex = re.compile(rf"{SAB}\.byte 0x[0-9A-Fa-f]+, 0x[0-9A-Fa-f]+")
 
 #beq_lclabel_regex = re.compile(rf"{SAB}beq .lclabel(\d+)")
@@ -162,7 +165,7 @@ def try_ignore_long_conditional_branch_diff_and_pool_branch(left_side, right_sid
                         #print(f"right side + 2 first char: {ord(right_side[index + 2][0])}")
                         #print("check1: " + str(right_side[index + 2] == f"{SAB}b {cond_label_if_no_long_branch}"))
     
-                    if right_side[index + 2] == f"{SAB}b {cond_label_if_no_long_branch}" and right_side[index + 3] == small_branch_label:
+                    if right_side[index + 2] in {f"{SAB}b {cond_label_if_no_long_branch}", f"{SAB}bl {cond_label_if_no_long_branch}"} and cond_label_if_no_long_branch[0] == "." and right_side[index + 3] == small_branch_label:
                         #print(f"all checks passed")
                         left_side[index] = "*"
                         right_side[index + 1] = "*"
@@ -190,6 +193,16 @@ def try_ignore_long_conditional_branch_diff_and_pool_branch(left_side, right_sid
                 left_side[index + 1] = "*"
                 left_side[index + 2] = "*"
                 return index + 3
+
+    # checking for super long branch from end of conditional block
+    if right_side[index] == "-" and left_side[index + 1] == "-":
+        match_obj = branch_regex.match(left_side[index])
+        if match_obj:
+            branch_label = match_obj.group(1)
+            if branch_label[0] == "." and right_side[index + 1] == f"{SAB}bl {branch_label}":
+                right_side[index] = "*"
+                left_side[index + 1] = "*"
+                return index + 2
 
     return index + 1
 
@@ -290,10 +303,16 @@ def better_diff(
 
     left_side, right_side = patch_left_side_right_side_diff(left_side, right_side)
 
+    num_diffs = 0
+
+    for left_line, right_line in zip(left_side, right_side):
+        if left_line == "-" or right_line == "-":
+            num_diffs += 1
+
     if width == -1:
         width = (longest_len + 2) * 2
 
-    return side_by_side(
+    return num_diffs, side_by_side(
         left=left_side,
         right=right_side,
         width=width,
