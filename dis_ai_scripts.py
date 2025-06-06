@@ -36,7 +36,7 @@ from luvdis.common import eprint, set_debug, dprint
 from luvdis.rom import ROM
 from luvdis.analyze import State, BASE_ADDRESS, END_ADDRESS, THUMB, BYTE, WORD
 
-subroutine_prototype_regex = re.compile(r"^AIScript_(\w+)\([^\)]*\)[^;]*$")
+subroutine_prototype_regex = re.compile(r"^(?:(?:u32|s32|bool32)(?:\s*\*)?|aiany|void|struct\s+(?:[A-Za-z]\w*)\s*\*) AIScript_(\w+)\([^\)]*\)[^;]*$")
 
 def disasm(rom, output, functions, debug, start, stop, macros, guess, min_calls, min_length, default_mode, no_parse_functions, subroutine_name_lookup, constpool_start_to_end_map, whole_rom_as_words, show_insn_addr_comments, consolidate_cond_jumps):
     """ Analyze and disassemble a GBA ROM. """
