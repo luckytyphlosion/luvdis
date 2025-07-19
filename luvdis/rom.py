@@ -1,7 +1,6 @@
 """ GBA ROM class & tools. """
 import sys
 import pickle
-import pkg_resources
 import xml.etree.ElementTree as ET
 from hashlib import sha1, md5
 from io import BytesIO
@@ -10,7 +9,7 @@ from luvdis.common import eprint, warn
 from luvdis.disasm import disasm
 
 
-DB_F = pkg_resources.resource_stream('luvdis', 'gba-db.pickle')
+DB_F = None #pkg_resources.resource_stream('luvdis', 'gba-db.pickle')
 ROM_DB = None  # Actual ROM db object
 
 

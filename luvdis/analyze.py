@@ -1,7 +1,6 @@
 """ ROM disassembly/dumping tools. """
 import sys
 import os.path
-import pkg_resources
 from math import inf as INF
 from bisect import bisect_left, bisect_right
 from io import BytesIO
@@ -31,7 +30,6 @@ THUMB = 0
 BASE_ADDRESS = 0x00000000
 END_ADDRESS = 0x00010000  # Highest addressable location
 ASM_PRELUDE = f'@ Generated with Luvdis v{__version__}\n.syntax unified\n.text\n'
-MACROS = pkg_resources.resource_string('luvdis', 'functions.inc').decode('utf-8')
 
 
 def left_gt(l, x):

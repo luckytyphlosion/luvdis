@@ -4,7 +4,7 @@
 # specific to diffing ai script dumps
 # those changes are under MIT
 
-import difflib
+import latest_difflib
 import itertools
 import textwrap
 import typing
@@ -256,7 +256,7 @@ def better_diff(
     :rtype: typing.Union[str, typing.List[str]]
     """
 
-    differ = difflib.Differ()
+    differ = latest_difflib.Differ()
 
     left_side = []
     right_side = []
