@@ -177,18 +177,25 @@ def try_ignore_long_conditional_branch_diff_and_pool_branch(left_side, right_sid
     # long conditional branch failed, try pool diff
     if left_side[index] == "-" and left_side[index + 1] == "-" and left_side[index + 2] == "-":
         # check the pool branch and the pool itself
-        if right_side[index + 1] == f"{SAB}.pool" and (match_obj := pool_branch_regex.match(right_side[index])):
-            # pool diff can either have two unused bytes or not after the pool
-            # check for these
-            pool_branch_label = match_obj.group(1)
-            if unused_2_bytes_regex.match(right_side[index + 2]):
-                if left_side[index + 3] == "-" and right_side[index + 3] == pool_branch_label:
+        if right_side[index + 1] == f"{SAB}.pool":
+            if (match_obj := pool_branch_regex.match(right_side[index])):
+                # pool diff can either have two unused bytes or not after the pool
+                # check for these
+                pool_branch_label = match_obj.group(1)
+                if unused_2_bytes_regex.match(right_side[index + 2]):
+                    if left_side[index + 3] == "-" and right_side[index + 3] == pool_branch_label:
+                        left_side[index] = "*"
+                        left_side[index + 1] = "*"
+                        left_side[index + 2] = "*"
+                        left_side[index + 3] = "*"
+                        return index + 4
+                elif right_side[index + 2] == pool_branch_label:
                     left_side[index] = "*"
                     left_side[index + 1] = "*"
                     left_side[index + 2] = "*"
-                    left_side[index + 3] = "*"
-                    return index + 4
-            elif right_side[index + 2] == pool_branch_label:
+                    return index + 3
+            # super edge case for pool being created right before a func start
+            elif branch_bytes_regex.match(right_side[index]) and unused_2_bytes_regex.match(right_side[index + 2]):
                 left_side[index] = "*"
                 left_side[index + 1] = "*"
                 left_side[index + 2] = "*"
