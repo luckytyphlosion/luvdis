@@ -652,7 +652,7 @@ class State:
         long_conditional_branch_index = 0
         for target_addr, discovery_addr in sorted(self.branches_by_discovery_order_addr.items(), key=lambda x: x[1]):
             # easier way to deal with long conditional branches
-            if self.consolidate_cond_jumps and self.branches_by_insn_addr[discovery_addr] in CONDITIONAL_BRANCHES and self.branches_by_insn_addr.get(discovery_addr + 2) in {Opcode.b, Opcode.bl} and not self.flags[discovery_addr + 4] & FLAG_WORD:
+            if self.consolidate_cond_jumps and self.branches_by_insn_addr[discovery_addr] in CONDITIONAL_BRANCHES and self.branches_by_insn_addr.get(discovery_addr + 2) in {Opcode.b, Opcode.bl} and not self.flags[discovery_addr + 4] & FLAG_WORD and self.branches_by_discovery_order_addr.get(discovery_addr + 2) is None:
                 self.branch_label_names[target_addr] = f".lclabel{long_conditional_branch_index}"
                 long_conditional_branch_index += 1
             # for a branch, if the next instruction is actually a word
