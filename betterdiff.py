@@ -109,7 +109,7 @@ branch_cond_to_inverse_cond_regex = {
     "le": bgt_label_regex,
 }
 
-pool_branch_regex = re.compile(rf"{SAB}b (\.plabel\d+)")
+pool_branch_regex = re.compile(rf"{SAB}b (\.p?label\d+)")
 branch_regex = re.compile(rf"{SAB}b (\.label\d+)")
 super_long_branch_regex = re.compile(rf"{SAB}bl (\.label\d+)")
 
@@ -189,6 +189,11 @@ def try_ignore_long_conditional_branch_diff_and_pool_branch(left_side, right_sid
                         left_side[index + 2] = "*"
                         left_side[index + 3] = "*"
                         return index + 4
+                    elif left_side[index + 3] == right_side[index + 3] == pool_branch_label:
+                        left_side[index] = "*"
+                        left_side[index + 1] = "*"
+                        left_side[index + 2] = "*"
+                        return index + 3
                 elif right_side[index + 2] == pool_branch_label:
                     left_side[index] = "*"
                     left_side[index + 1] = "*"
