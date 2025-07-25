@@ -69,7 +69,7 @@ def generate_expected_output_and_subroutine_name_lookup(ai_scripts_directory, te
         stripped_line = line.strip()
         if stripped_line.startswith("///"):
             asm_line = line.split("///", maxsplit=1)[1]
-            if asm_line.startswith(".pool") or not asm_line.startswith(".") and not asm_line.endswith(":"):
+            if asm_line.startswith(".pool") or asm_line.startswith(".byte") or not asm_line.startswith(".") and not asm_line.endswith(":"):
                 asm_line = f"\t{asm_line}"
 
             asm_lines.append(asm_line)
